@@ -26,6 +26,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	"github.com/pkg/errors"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +44,7 @@ import (
 	"open-cluster-management.io/managed-serviceaccount/pkg/features"
 	"open-cluster-management.io/managed-serviceaccount/pkg/util"
 	ctrl "sigs.k8s.io/controller-runtime"
-	//+kubebuilder:scaffold:imports
+	// +kubebuilder:scaffold:imports
 )
 
 var (
@@ -54,7 +55,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(authv1alpha1.AddToScheme(scheme))
-	//+kubebuilder:scaffold:scheme
+	// +kubebuilder:scaffold:scheme
 }
 
 func main() {
@@ -99,6 +100,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	inClusterConfig, err := rest.InClusterConfig()
+	if err != nil {
+		setupLog.Error(err, "unable to get InClusterConfig")
+		os.Exit(1)
+	}
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
@@ -106,6 +112,7 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "managed-serviceaccount-addon-manager",
+		LeaderElectionConfig:   inClusterConfig,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -121,6 +128,12 @@ func main() {
 	nativeClient, err := kubernetes.NewForConfig(mgr.GetConfig())
 	if err != nil {
 		setupLog.Error(err, "unable to instantiating kubernetes native client")
+		os.Exit(1)
+	}
+
+	inClusterClient, err := kubernetes.NewForConfig(inClusterConfig)
+	if err != nil {
+		setupLog.Error(err, "unable to instantiating kubernetes inCluster native client")
 		os.Exit(1)
 	}
 
@@ -149,7 +162,7 @@ func main() {
 
 	imagePullSecret := &corev1.Secret{}
 	if len(imagePullSecretName) != 0 {
-		imagePullSecret, err = nativeClient.CoreV1().Secrets(hubNamespace).Get(
+		imagePullSecret, err = inClusterClient.CoreV1().Secrets(hubNamespace).Get(
 			context.TODO(),
 			imagePullSecretName,
 			metav1.GetOptions{},
